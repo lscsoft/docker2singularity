@@ -135,13 +135,16 @@ echo ""
 ### CONTAINER RUNNING ID #######################################################
 ################################################################################
 
-runningid=`docker run -d $image tail -f /dev/null`
+runningid=`docker run -d $image`
 
 # Full id looks like
 # sha256:d59bdb51bb5c4fb7b2c8d90ae445e0720c169c553bcf553f67cb9dd208a4ec15
 
 # Take the first 12 characters to get id of container
 container_id=`echo ${runningid} | cut -c1-12`
+
+# the container is no longer necessary to keep around
+docker stop $container_id >> /dev/null
 
 # Network address, if needed
 network_address=`docker inspect --format="{{.NetworkSettings.IPAddress}}" $container_id`
@@ -151,11 +154,9 @@ network_address=`docker inspect --format="{{.NetworkSettings.IPAddress}}" $conta
 ### IMAGE NAME #################################################################
 ################################################################################
 
-image_name=`docker inspect --format="{{.Config.Image}}" $container_id`
-
 # using bash substitution
 # removing special chars [perhaps echo + sed would be better for other chars]
-image_name=${image_name//\//_}
+image_name=${image//\//_}
 image_name=${image_name/:/_}
 
 # following is the date of the container, not the docker image.
@@ -198,10 +199,9 @@ build_sandbox="${new_container_name}.build"
 echo "(1/10) Creating a build sandbox..."
 mkdir -p ${build_sandbox}
 echo "(2/10) Exporting filesystem..."
-docker export $container_id >> $build_sandbox.tar
+docker image save $image >> $build_sandbox.tar
 singularity image.import $build_sandbox < $build_sandbox.tar
 docker inspect $container_id >> $build_sandbox/singularity.json
-
 
 ################################################################################
 ### METADATA ###################################################################
@@ -283,7 +283,7 @@ chmod +x $build_sandbox/.singularity.d/runscript;
 ################################################################################
 
 echo "(5/10) Setting ENV variables..."
-docker run --rm --entrypoint="/usr/bin/env" $image > $TMPDIR/docker_environment
+docker inspect --format='{{range $_, $e := .Config.Env}}{{println $e}}{{end}}' $image > $TMPDIR/docker_environment
 # do not include HOME and HOSTNAME - they mess with local config
 sed -i '/^HOME/d' $TMPDIR/docker_environment
 sed -i '/^HOSTNAME/d' $TMPDIR/docker_environment
@@ -312,8 +312,7 @@ echo "(7/10) Fixing permissions..."
 find ${build_sandbox}/* -maxdepth 0 -not -path '${build_sandbox}/dev*' -not -path '${build_sandbox}/proc*' -not -path '${build_sandbox}/sys*' -exec chmod a+r -R '{}' \;
 find ${build_sandbox}/* -type f -or -type d -perm -u+x,o-x -not -path '${build_sandbox}/dev*' -not -path '${build_sandbox}/proc*' -not -path '${build_sandbox}/sys*' -exec chmod a+x '{}' \;
 
-echo "(8/10) Stopping and removing the container..."
-docker stop $container_id >> /dev/null
+echo "(8/10) Removing the container..."
 docker rm $container_id >> /dev/null
 
 # Build a final image from the sandbox
